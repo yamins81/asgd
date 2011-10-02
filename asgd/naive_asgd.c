@@ -1,27 +1,89 @@
-#include <math.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
+#include "naive_asgd.h"
 
-// type and size parameters
-// will need to autoset them later on
-typedef unsigned int uint;
+#include <cblas.h>
 
-typedef struct matrix matrix_t;
-struct matrix {
-	size_t rows;
-	size_t cols;
-	double *data;
-};
-
-void swap(double *a, double *b)
+matrix_t *matrix_init(
+		order_t order,
+		size_t rows,
+		size_t cols,
+		size_t ld)
 {
-	double x = *a;
-	*a = *b;
-	*b = x;
+	matrix_t *m = malloc(sizeof(*m));
+	size_t major = order == row_major ? rows : cols;
+	m->data = calloc(major*ld, sizeof(*m->data));
+	return m;
+}
+
+void matrix_destr(matrix_t *m)
+{
+	free(m->data);
+	free(m);
+}
+
+float matrix_get(matrix_t *m, size_t i, size_t j)
+{
+	if (__builtin_expect(m->order == row_major, true))
+	{
+		return m->data[i*m->ld + j];
+	}
+	else
+	{
+		return m->data[j*m->ld + i];
+	}
+}
+
+void matrix_set(matrix_t *m, size_t i, size_t j, float val)
+{
+	if (__builtin_expect(m->order == row_major, true))
+	{
+		m->data[i*m->ld + j] = val;
+	}
+	else
+	{
+		m->data[j*m->ld + i] = val;
+	}
+}
+
+float *matrix_row(matrix_t *m, size_t i)
+{
+	if (__builtin_expect(m->order == row_major, true))
+	{
+		return m->data + i*m->ld;
+	}
+	else
+	{
+		// TODO
+		// pick all items in i-th vertical?
+		return NULL;
+	}
+}
+
+void matrix_copy(matrix_t *dst, const matrix_t *src)
+{
+	dst->order = src->order;
+	dst->rows = src->rows;
+	dst->cols = src->cols;
+	dst->ld = src->ld;
+	
+	size_t major = src->order == row_major ? src->rows : src->cols;
+	memcpy(dst->data, src->data, major * src->ld * sizeof(*src->data));
+}
+
+matrix_t *matrix_clone(matrix_t *m)
+{
+	matrix_t *r = malloc(sizeof(*r));
+	memcpy(r, m, sizeof(*m));
+	size_t major = m->order == row_major ? m->rows : m->cols;
+	r->data = malloc(major * m->ld * sizeof(*m->data));
+	memcpy(r->data, r->data, major * m->ld * sizeof(*m->data));
+	return r;
+}
+
+static void swap(matrix_t *m, size_t j, size_t k, size_t x, size_t y)
+{
+	float buff = matrix_get(m, j, k);
+	matrix_set(m, j, k, matrix_get(m, x, y));
+	matrix_set(m, x, y, buff);
 }
 
 /**
@@ -29,7 +91,7 @@ void swap(double *a, double *b)
  * @param cond The condition to check
  * @param mex A string to print if the condition is false
  */
-void aassert(bool cond, const char *mex)
+void mex_assert(bool cond, const char *mex)
 {
 	if (__builtin_expect(!cond, false)) {
 		fprintf(stderr, "%s\n", mex);
@@ -43,20 +105,20 @@ void aassert(bool cond, const char *mex)
  * @param b The second vector
  * @param c The length of the vectors
  */
-double inner_product(
-		double *a,
-		double *b,
+/*float inner_product(
+		float *a,
+		float *b,
 		size_t length)
 {
-	double sum = 0.0;
+	float sum = 0.0;
 	while (length--) {
 		sum += a[length] * b[length];
 	}
 	return sum;
-}
+}*/
 
-void scalar_product(
-		double s,
+/*void scalar_product(
+		float s,
 		matrix_t *m)
 {
 	for (uint i = 0; i < m->rows; ++i) {
@@ -64,10 +126,10 @@ void scalar_product(
 			m->data[i*m->rows+m->cols] *= s;
 		}
 	}
-}
+}*/
 
-void scalar_sum(
-		double s,
+/*void scalar_sum(
+		float s,
 		matrix_t *m)
 {
 	for (uint i = 0; i < m->rows; ++i) {
@@ -75,157 +137,161 @@ void scalar_sum(
 			m->data[i*m->rows+m->cols] += s;
 		}
 	}
-}
+}*/
 
-void durstenfeld_shuffle(matrix_t *matrix)
+static void durstenfeld_shuffle(matrix_t *m)
 {
 	srand(time(NULL));
-	for (uint i = matrix->rows-1; i > 0; --i) {
-		uint j = rand() % (i+1);
+	for (size_t i = m->rows-1; i > 0; --i) {
+		size_t j = rand() % (i+1);
 		// flip current row with a random row among remaining ones
-		for (uint k = 0; k < matrix->cols; ++i) {
-			swap(matrix->data+(matrix->cols*i+k), matrix->data+(matrix->cols*j+k));
+		for (size_t k = 0; k < m->cols; ++i) {
+			swap(m, i, k, j, k);
 		}
 	}
 }
 
-typedef struct native_binary_asgd native_binary_asgd_t;
-struct native_binary_asgd
-{
-	uint n_features;
-	uint n_iterations;
-	double l2_regularization;
-	double sgd_step_size;
-	double sgd_step_size0;
-	bool feedback;
-
-	matrix_t sgd_weights; // n_features long
-	
-	double sgd_bias;
-	double sgd_step_size_scheduling_exponent;
-	double sgd_step_size_scheduling_multiplier;
-
-	matrix_t asgd_weights; // n_features long
-	
-	double asgd_bias;
-	double asgd_step_size;
-	double asgd_step_size0;
-
-	uint n_observations;
-};
-
 /**
  * Constructor for the Binary ASGD structure
  */
-void native_binary_asgd_init(
-	native_binary_asgd_t *data,
-	uint n_features,
-	double sgd_step_size0,
-	double l2_regularization,
-	uint n_iterations,
+nb_asgd_t *nb_asgd_init(
+	uint64_t n_feats,
+	float sgd_step_size0,
+	float l2_reg,
+	uint64_t n_iters,
 	bool feedback)
 {
-	data->n_features = n_features;
-	data->n_iterations = n_iterations;
+	nb_asgd_t *data = malloc(sizeof(*data));
+	mex_assert(data != NULL, "cannot allocate nb_asgd");
+	data->n_feats = n_feats;
+	data->n_iters = n_iters;
 	data->feedback = feedback;
 
-	if (__builtin_expect(l2_regularization <= 0, false))
-	{
-		fprintf(stderr, "invalid l2_regularization, quitting");
-		exit(EXIT_FAILURE);
-	}
-	data->l2_regularization = l2_regularization;
+	mex_assert(__builtin_expect(l2_reg > 0, true), "invalid l2 regularization");
+	data->l2_reg = l2_reg;
 
-	data->sgd_weights.data = malloc(n_features*sizeof(*data->sgd_weights.data));
-	aassert(data->sgd_weights.data != NULL, "could not allocate sgd_weights");
-	data->sgd_weights.rows = 1;
-	data->sgd_weights.cols = n_features;
-
-	data->sgd_bias = 0;
+	data->sgd_weights = matrix_init(row_major, n_feats, 1, sizeof(*data->sgd_weights->data));
+	data->sgd_bias = matrix_init(row_major, 1, 1, sizeof(*data->sgd_weights->data));
 	data->sgd_step_size = sgd_step_size0;
 	data->sgd_step_size0 = sgd_step_size0;
-	data->sgd_step_size_scheduling_exponent = 2. / 3.;
-	data->sgd_step_size_scheduling_multiplier = l2_regularization;
 
-	data->asgd_weights.data = malloc(n_features*sizeof(*data->asgd_weights.data));
-	aassert(data->asgd_weights.data != NULL, "could not allocate asgd_weights");
-	data->asgd_weights.rows = 1;
-	data->asgd_weights.cols = n_features;
+	data->sgd_step_size_scheduling_exp = 2. / 3.;
+	data->sgd_step_size_scheduling_mul = l2_reg;
 
-	data->asgd_bias = 0;
+	data->asgd_weights = matrix_init(row_major, n_feats, 1, sizeof(*data->asgd_weights->data));
+	data->asgd_bias = matrix_init(row_major, 1, 1, sizeof(*data->asgd_weights->data));
 	data->asgd_step_size = 1;
 	data->asgd_step_size0 = 1;
 
-	data->n_observations = 0;
+	data->n_observs = 0;
+	return data;
 }
 
 /**
  * Destructor for the Binary ASGD structure
  */
-void native_binary_asgd_destr(
-		native_binary_asgd_t *data)
+void nb_asgd_destr(
+		nb_asgd_t *data)
 {
-	free(data->sgd_weights.data);
-	free(data->asgd_weights.data);
+	matrix_destr(data->sgd_weights);
+	matrix_destr(data->sgd_bias);
+	matrix_destr(data->asgd_weights);
+	matrix_destr(data->asgd_bias);
+	free(data);
 }
 
 void partial_fit(
-		native_binary_asgd_t *data,
+		nb_asgd_t *data,
 		matrix_t *X,
 		matrix_t *y)
 {
-	matrix_t asgd_weights = data->asgd_weights;
-	double asgd_bias = data->asgd_bias;
-	uint asgd_step_size = data->asgd_step_size;
 
-	for (uint i = 0; i < X->cols; ++i) {) {
+	for (size_t i = 0; i < X->rows; ++i) {
+		
+		// compute margin
+		float margin = matrix_get(y, i, 1) * // TODO this will become a matrix
+			cblas_sdsdot(X->cols, matrix_get(data->sgd_bias, 1, 1),
+				matrix_row(X, i), sizeof(*X->data),
+				matrix_row(data->sgd_weights, i), data->sgd_weights->ld);
 
-		for (uint j = 0; j < y->cols; ++j) {
-			
-			double margin = y->data[j] *
-				(inner_product(X->data+i, data->sgd_weights.data+j, X->cols) + data->sgd_bias);
-
-			if (data->l2_regularization == 0) {
-				scalar_product(1 - data->l2_regularization * data->sgd_step_size,
-						data->sgd_weights.data,
-						data->sgd_weights.cols);
-			}
-
-			if (margin < 1) {
-				// TODO use proper dimensions
-			}
-
+		// update sgd
+		if (data->l2_reg != 0)
+		{
+			// TODO this will become a matrix
+			cblas_sscal(data->sgd_weights->rows,
+					1 - data->l2_reg * data->sgd_step_size,
+					data->sgd_weights->data, sizeof(*data->sgd_weights->data));
 		}
+
+		if (margin < 1)
+		{
+			// TODO this will become a matrix
+			cblas_saxpy(X->rows,
+					data->sgd_step_size * matrix_get(y, i, 1),
+					X->data, sizeof(*X->data),
+					data->sgd_weights->data, sizeof(*data->sgd_weights->data));
+			
+			// TODO this will become a vector
+			matrix_set(data->sgd_bias, 1, 1,
+					data->sgd_step_size * matrix_get(y, i, 1));
+		}
+
+		// update asgd
+		matrix_t *asgd_weights = matrix_clone(data->asgd_weights);
+		cblas_sscal(asgd_weights->rows,
+				1 - data->asgd_step_size,
+				asgd_weights->data, sizeof(*asgd_weights->data));
+		cblas_saxpy(asgd_weights->rows,
+				data->asgd_step_size,
+				data->asgd_weights->data, sizeof(*data->asgd_weights->data),
+				asgd_weights->data, sizeof(*asgd_weights->data));
+
+		matrix_t *asgd_bias = matrix_clone(data->asgd_bias);
+		matrix_set(asgd_bias, 1, 1,
+				1 - data->asgd_step_size * matrix_get(asgd_bias, 1, 1) +
+				data->asgd_step_size * matrix_get(data->sgd_bias, 1, 1));
+		
+		// update step_sizes
+		data->n_observs += 1;
+		float sgd_step_size_scheduling = 1 + data->sgd_step_size0 * data->n_observs
+			* data->sgd_step_size_scheduling_mul;
+		data->sgd_step_size = data->sgd_step_size0 /
+			powf(sgd_step_size_scheduling, data->sgd_step_size_scheduling_exp);
+		data->asgd_step_size = 1.0f / data->n_observs;
+
+		matrix_copy(data->asgd_weights, asgd_weights);
+		matrix_copy(data->asgd_bias, asgd_bias);
+
+		matrix_destr(asgd_weights);
+		matrix_destr(asgd_bias);
 	}
 }
 
 void fit(
-	native_binary_asgd_t *data,
+	nb_asgd_t *data,
 	matrix_t *X,
 	matrix_t *y)
 {
-	aassert(X->rows == 2, "fit: X should have 2 rows");
-	aassert(y->rows == 1, "fit: y should have 2 rows");
-	aassert(X->rows == data->n_features, "fit: X has wrong col num");
-	aassert(X->cols == y->cols, "fit: X-y dim mismatch");
+	mex_assert(X->rows > 1, "fit: X should be a matrix");
+	mex_assert(y->cols == 1, "fit: y should be a column vector");
 
-	for (uint i = 0; i < data->n_iterations; ++ i) {
+	for (uint64_t i = 0; i < data->n_iters; ++i) {
 		durstenfeld_shuffle(X);
-		durstenfeld_shuffle(y); // FIXME establish correct dimension
-		partial_fit(data, X, y);
+		durstenfeld_shuffle(y);
+		//partial_fit(data, X, y);
 
 		if (data->feedback) {
-			memcpy(&data->sgd_weights, &data->asgd_weights, sizeof(data->sgd_weights));
-			data->sgd_bias = data->asgd_bias;
+			matrix_copy(data->sgd_weights, data->asgd_weights);
+			matrix_copy(data->sgd_bias, data->asgd_bias);
 		}
 	}
 }
 
-double predict(
-	native_binary_asgd_t *data,
-	double *X)
+float predict(
+	nb_asgd_t *data,
+	matrix_t *X)
 {
-	double dot = inner_product(data->asgd_weights.data, X, data->asgd_weights.cols);
-	return copysign(1.0, dot + data->asgd_bias);
+	// TODO
+	// find appropriate BLAS
 }
 
