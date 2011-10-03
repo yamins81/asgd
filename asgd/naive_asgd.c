@@ -9,6 +9,10 @@ matrix_t *matrix_init(
 		size_t ld)
 {
 	matrix_t *m = malloc(sizeof(*m));
+	m->order = order;
+	m->rows = rows;
+	m->cols = cols;
+	m->ld = ld;
 	size_t major = order == row_major ? rows : cols;
 	m->data = calloc(major*ld, sizeof(*m->data));
 	return m;
@@ -145,7 +149,7 @@ static void durstenfeld_shuffle(matrix_t *m)
 	for (size_t i = m->rows-1; i > 0; --i) {
 		size_t j = rand() % (i+1);
 		// flip current row with a random row among remaining ones
-		for (size_t k = 0; k < m->cols; ++i) {
+		for (size_t k = 0; k < m->cols; ++k) {
 			swap(m, i, k, j, k);
 		}
 	}
@@ -209,10 +213,10 @@ void partial_fit(
 	for (size_t i = 0; i < X->rows; ++i) {
 		
 		// compute margin
-		float margin = matrix_get(y, i, 1) * // TODO this will become a matrix
-			cblas_sdsdot(X->cols, matrix_get(data->sgd_bias, 1, 1),
-				matrix_row(X, i), sizeof(*X->data),
-				matrix_row(data->sgd_weights, i), data->sgd_weights->ld);
+		float margin = matrix_get(y, i, 0) * // TODO this will become a matrix
+			cblas_sdsdot(X->cols, matrix_get(data->sgd_bias, 0, 0),
+				matrix_row(X, i), 1,
+				matrix_row(data->sgd_weights, i), 1);
 
 		// update sgd
 		if (data->l2_reg != 0)
@@ -220,36 +224,41 @@ void partial_fit(
 			// TODO this will become a matrix
 			cblas_sscal(data->sgd_weights->rows,
 					1 - data->l2_reg * data->sgd_step_size,
-					data->sgd_weights->data, sizeof(*data->sgd_weights->data));
+					data->sgd_weights->data, 1);
 		}
 
 		if (margin < 1)
 		{
 			// TODO this will become a matrix
-			cblas_saxpy(X->rows,
-					data->sgd_step_size * matrix_get(y, i, 1),
-					X->data, sizeof(*X->data),
-					data->sgd_weights->data, sizeof(*data->sgd_weights->data));
-			
+			matrix_t *sgd_weights = matrix_clone(data->sgd_weights);
+			cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
+					X->rows, data->sgd_weights->cols, X->cols, 
+					data->sgd_step_size * matrix_get(y, i, 0),
+					X->data, X->ld,
+					sgd_weights->data, sgd_weights->ld,
+					1.0f,
+					data->sgd_weights->data, data->sgd_weights->ld);
+			// matrix_destr(sgd_weights); FIXME
+
 			// TODO this will become a vector
-			matrix_set(data->sgd_bias, 1, 1,
-					data->sgd_step_size * matrix_get(y, i, 1));
+			matrix_set(data->sgd_bias, 0, 0,
+					data->sgd_step_size * matrix_get(y, i, 0));
 		}
 
 		// update asgd
 		matrix_t *asgd_weights = matrix_clone(data->asgd_weights);
 		cblas_sscal(asgd_weights->rows,
 				1 - data->asgd_step_size,
-				asgd_weights->data, sizeof(*asgd_weights->data));
+				asgd_weights->data, 1);
 		cblas_saxpy(asgd_weights->rows,
 				data->asgd_step_size,
-				data->asgd_weights->data, sizeof(*data->asgd_weights->data),
-				asgd_weights->data, sizeof(*asgd_weights->data));
+				data->asgd_weights->data, 1,
+				asgd_weights->data, 1);
 
 		matrix_t *asgd_bias = matrix_clone(data->asgd_bias);
-		matrix_set(asgd_bias, 1, 1,
-				1 - data->asgd_step_size * matrix_get(asgd_bias, 1, 1) +
-				data->asgd_step_size * matrix_get(data->sgd_bias, 1, 1));
+		matrix_set(asgd_bias, 0, 0,
+				1 - data->asgd_step_size * matrix_get(asgd_bias, 0, 0) +
+				data->asgd_step_size * matrix_get(data->sgd_bias, 0, 0));
 		
 		// update step_sizes
 		data->n_observs += 1;
@@ -278,7 +287,7 @@ void fit(
 	for (uint64_t i = 0; i < data->n_iters; ++i) {
 		durstenfeld_shuffle(X);
 		durstenfeld_shuffle(y);
-		//partial_fit(data, X, y);
+		partial_fit(data, X, y);
 
 		if (data->feedback) {
 			matrix_copy(data->sgd_weights, data->asgd_weights);
@@ -287,11 +296,29 @@ void fit(
 	}
 }
 
-float predict(
+void predict(
 	nb_asgd_t *data,
-	matrix_t *X)
+	matrix_t *X,
+	matrix_t *r)
 {
-	// TODO
-	// find appropriate BLAS
+	// TODO r must be inited to zeros
+	cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans,
+		1, r->rows, r->rows, 1.0f,
+		data->asgd_weights->data, data->asgd_weights->ld,
+		X->data, X->ld,
+		matrix_get(data->asgd_bias, 0, 0),
+		r->data, r->ld);
+
+	for (size_t i = 0; i < r->rows; ++i)
+	{
+		if (matrix_get(r, i, 0) >= 0)
+		{
+			matrix_set(r, i, 0, 1.0f);
+		}
+		else
+		{
+			matrix_set(r, i, 0, -1.0f);
+		}
+	}
 }
 

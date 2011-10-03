@@ -71,5 +71,12 @@ nb_asgd_t *nb_asgd_init(
 void nb_asgd_destr(
 		nb_asgd_t *data);
 
+void fit(nb_asgd_t *data, matrix_t *X, matrix_t *y);
+
+void partial_fit(nb_asgd_t *data, matrix_t *X, matrix_t *y);
+
+void predict(nb_asgd_t *data, matrix_t *X, matrix_t *r);
+
+
 #endif
 
