@@ -1,11 +1,9 @@
-#include <gsl/gsl_matrix.h>
-#include <gsl/gsl_cblas.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
 
-#include "naive_asgd.h"
+#include "blas_asgd.h"
 
 int main(
 	int argc,
@@ -15,10 +13,10 @@ int main(
 	size_t n_points = 1000;
 	size_t n_feats = 100;
 
-	matrix_t *X = matrix_init(row_major, n_points, n_feats, n_feats*sizeof(*X->data));
-	matrix_t *y = matrix_init(row_major, n_points, 1, 1*sizeof(*y->data));
-	matrix_t *Xtst = matrix_init(row_major, n_points, n_feats, n_feats*sizeof(*Xtst->data));
-	matrix_t *ytst = matrix_init(row_major, n_points, 1, 1*sizeof(*ytst->data));
+	matrix_t *X = matrix_init(n_points, n_feats, 0.0f);
+	matrix_t *y = matrix_init(n_points, 1, 0.0f);
+	matrix_t *Xtst = matrix_init(n_points, n_feats, 0.0f);
+	matrix_t *ytst = matrix_init(n_points, 1, 0.0f);
 	for (size_t i = 0; i < n_points; ++i)
 	{
 		float last0 = powf(-1.0f, rand());
@@ -38,9 +36,9 @@ int main(
 	
 	nb_asgd_t *clf = nb_asgd_init(n_feats, 1e-3f, 1e-6f, 4, false);
 	fit(clf, X, y);
-	matrix_t *ytrn_preds = matrix_init(row_major, n_feats, 1, sizeof(*ytrn_preds->data));
+	matrix_t *ytrn_preds = matrix_init(1, n_points, 1.0f);
 	predict(clf, X, ytrn_preds);
-	matrix_t *ytst_preds = matrix_init(row_major, n_feats, 1, sizeof(*ytst_preds->data));
+	matrix_t *ytst_preds = matrix_init(1, n_points, 1.0f);
 	predict(clf, Xtst, ytst_preds);
 
 	nb_asgd_destr(clf);
