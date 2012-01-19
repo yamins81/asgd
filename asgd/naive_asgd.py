@@ -34,8 +34,15 @@ class NaiveBinaryASGD(object):
 
         self.n_observations = 0
 
-    def partial_fit(self, X, y):
-
+    def partial_fit(self, X, y, tw=None):
+        
+        if tw is None:
+            tw = np.ones((len(y),))
+        else:
+            assert tw.shape = y.shape
+            
+        y = tw * y
+        
         sgd_step_size0 = self.sgd_step_size0
         sgd_step_size = self.sgd_step_size
         sgd_step_size_scheduling_exponent = \
@@ -93,7 +100,7 @@ class NaiveBinaryASGD(object):
 
         self.n_observations = n_observations
 
-    def fit(self, X, y):
+    def fit(self, X, y, tw=None):
 
         assert X.ndim == 2
         assert y.ndim == 1
@@ -101,7 +108,12 @@ class NaiveBinaryASGD(object):
         n_points, n_features = X.shape
         assert n_features == self.n_features
         assert n_points == y.size
-
+        
+        if tw is None:
+            tw = np.ones((len(y),))
+        else:
+            assert tw.shape == y.shape
+    
         n_iterations = self.n_iterations
 
         for i in xrange(n_iterations):
@@ -109,7 +121,8 @@ class NaiveBinaryASGD(object):
             idx = np.random.permutation(n_points)
             Xb = X[idx]
             yb = y[idx]
-            self.partial_fit(Xb, yb)
+            wb = w[idx]
+            self.partial_fit(Xb, yb, tw=tw)
 
             if self.feedback:
                 self.sgd_weights = self.asgd_weights
