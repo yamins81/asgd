@@ -445,6 +445,6 @@ class NaiveOVAASGD(BaseASGD):
 
     def decision_function(self, X):
         return dot(X, self.asgd_weights) + self.asgd_bias
-
+        
     def predict(self, X):
         return self.decision_function(X).argmax(1)

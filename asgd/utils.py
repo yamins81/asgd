@@ -5,7 +5,7 @@ import numpy as np
 ##stats##
 #########
 
-def multiclass_stats(actual, predicted, labels):
+def classification_stats(actual, predicted, labels):
     accuracy = float(100*(predicted == actual).sum() / float(len(predicted)))
     aps = []
     aucs = []
@@ -81,7 +81,8 @@ def precision_and_recall(actual, predicted, cls):
     rec = tp /np.sum(predicted == cls)
     prec = tp / (fp + tp)
     return prec, rec
-    
+
+
 
 #########
 ##utils##
