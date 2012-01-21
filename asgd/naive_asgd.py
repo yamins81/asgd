@@ -189,7 +189,7 @@ class NaiveBinaryASGD(BaseASGD, DetermineStepSizeMixin):
         self.asgd_bias = np.zeros((1), dtype=dtype)
 
 
-    def partial_fit(self, X, y, margin_bias=None):
+    def partial_fit(self, X, y, margin_biases=None):
         assert np.all(y ** 2 == 1)  # make sure labels are +-1
         sgd_step_size0 = self.sgd_step_size0
         sgd_step_size = self.sgd_step_size
@@ -210,10 +210,10 @@ class NaiveBinaryASGD(BaseASGD, DetermineStepSizeMixin):
 
         costs = []
 
-        if margin_bias is None:
-             margin_bias = np.ones((len(y),))
+        if margin_biases is None:
+             margin_biases = np.zeros((len(y),))
              
-        for obs, label, mbias in izip(X, y, margin_bias):
+        for obs, label, margin_bias in izip(X, y, margin_biases):
 
             # -- compute margin
             margin = label * (dot(obs, sgd_weights) + sgd_bias)
@@ -222,7 +222,7 @@ class NaiveBinaryASGD(BaseASGD, DetermineStepSizeMixin):
             if l2_regularization:
                 sgd_weights *= (1 - l2_regularization * sgd_step_size)
 
-            if margin < mbias:
+            if margin < 1 - margin_bias:
                 sgd_weights += sgd_step_size * label * obs
                 sgd_bias += sgd_step_size * label
                 costs.append(1 - float(margin))
@@ -260,7 +260,7 @@ class NaiveBinaryASGD(BaseASGD, DetermineStepSizeMixin):
 
         return self
 
-    def fit(self, X, y, margin_bias=None):
+    def fit(self, X, y, margin_biases=None):
         assert X.ndim == 2
         assert y.ndim == 1
 
@@ -270,8 +270,8 @@ class NaiveBinaryASGD(BaseASGD, DetermineStepSizeMixin):
 
         n_iterations = self.n_iterations
 
-        if margin_bias is None:
-             margin_bias = np.ones((len(y),))
+        if margin_biases is None:
+             margin_biases = np.zeros((len(y),))
 
         if self.sgd_step_size0 is None:
             self.determine_sgd_step_size0(X, y)
@@ -282,8 +282,8 @@ class NaiveBinaryASGD(BaseASGD, DetermineStepSizeMixin):
             Xb = X[idx]
             yb = y[idx]
             wb = w[idx]
-            mb = margin_bias[idx]
-            self.partial_fit(Xb, yb, margin_bias=mb)
+            mb = margin_biases[idx]
+            self.partial_fit(Xb, yb, margin_biases=mb)
 
             if self.feedback:
                 self.sgd_weights = self.asgd_weights
@@ -341,7 +341,7 @@ class NaiveOVAASGD(BaseASGD):
         self.asgd_weights = np.zeros((n_features, n_classes), dtype=dtype)
         self.asgd_bias = np.zeros((n_classes), dtype=dtype)
 
-    def partial_fit(self, X, y):
+    def partial_fit(self, X, y, margin_biases=None):
 
         if set(y) > set(range(self.n_classes)):
             raise ValueError("Invalid 'y'")
@@ -364,9 +364,12 @@ class NaiveOVAASGD(BaseASGD):
         n_observations = self.n_observations
         n_classes = self.n_classes
 
-        for obs, label in izip(X, y):
+        if margin_biases is None:
+             margin_biases = np.zeros((len(y),))
+             
+        for obs, label, margin_bias in izip(X, y, margin_biases):
             label = 2 * (np.arange(n_classes) == label).astype(int) - 1
-
+            
             # -- compute margin
             margin = label * (dot(obs, sgd_weights) + sgd_bias)
 
@@ -374,7 +377,7 @@ class NaiveOVAASGD(BaseASGD):
             if l2_regularization:
                 sgd_weights *= (1 - l2_regularization * sgd_step_size)
 
-            violations = margin < 1
+            violations = margin < 1 - margin_bias
             label_violated = label[violations]
             sgd_weights[:, violations] += (
                 sgd_step_size
@@ -411,7 +414,7 @@ class NaiveOVAASGD(BaseASGD):
 
         return self
 
-    def fit(self, X, y):
+    def fit(self, X, y, margin_biases=None):
 
         assert X.ndim == 2
         assert y.ndim == 1
@@ -421,14 +424,19 @@ class NaiveOVAASGD(BaseASGD):
         assert n_points == y.size
 
         n_iterations = self.n_iterations
+        
+
+        if margin_biases is None:
+             margin_biases = np.zeros((len(y),))        
 
         for i in xrange(n_iterations):
 
             idx = self.rstate.permutation(n_points)
             Xb = X[idx]
             yb = y[idx]
-            self.partial_fit(Xb, yb)
-
+            mb = margin_biases=[idx]
+            self.partial_fit(Xb, yb, margin_biases=mb)
+            
             if self.feedback:
                 self.sgd_weights = self.asgd_weights
                 self.sgd_bias = self.asgd_bias
