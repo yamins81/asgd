@@ -189,7 +189,7 @@ class NaiveBinaryASGD(BaseASGD, DetermineStepSizeMixin):
         self.asgd_bias = np.zeros((1), dtype=dtype)
 
 
-    def partial_fit(self, X, y):
+    def partial_fit(self, X, y, margin_bias=None):
         assert np.all(y ** 2 == 1)  # make sure labels are +-1
         sgd_step_size0 = self.sgd_step_size0
         sgd_step_size = self.sgd_step_size
@@ -210,7 +210,10 @@ class NaiveBinaryASGD(BaseASGD, DetermineStepSizeMixin):
 
         costs = []
 
-        for obs, label in izip(X, y):
+        if margin_bias is None:
+             margin_bias = np.ones((len(y),))
+             
+        for obs, label, mbias in izip(X, y, margin_bias):
 
             # -- compute margin
             margin = label * (dot(obs, sgd_weights) + sgd_bias)
@@ -219,8 +222,7 @@ class NaiveBinaryASGD(BaseASGD, DetermineStepSizeMixin):
             if l2_regularization:
                 sgd_weights *= (1 - l2_regularization * sgd_step_size)
 
-            if margin < 1:
-
+            if margin < mbias:
                 sgd_weights += sgd_step_size * label * obs
                 sgd_bias += sgd_step_size * label
                 costs.append(1 - float(margin))
@@ -258,7 +260,7 @@ class NaiveBinaryASGD(BaseASGD, DetermineStepSizeMixin):
 
         return self
 
-    def fit(self, X, y):
+    def fit(self, X, y, margin_bias=None):
         assert X.ndim == 2
         assert y.ndim == 1
 
@@ -267,6 +269,9 @@ class NaiveBinaryASGD(BaseASGD, DetermineStepSizeMixin):
         assert n_points == y.size
 
         n_iterations = self.n_iterations
+
+        if margin_bias is None:
+             margin_bias = np.ones((len(y),))
 
         if self.sgd_step_size0 is None:
             self.determine_sgd_step_size0(X, y)
@@ -277,7 +282,8 @@ class NaiveBinaryASGD(BaseASGD, DetermineStepSizeMixin):
             Xb = X[idx]
             yb = y[idx]
             wb = w[idx]
-            self.partial_fit(Xb, yb)
+            mb = margin_bias[idx]
+            self.partial_fit(Xb, yb, margin_bias=mb)
 
             if self.feedback:
                 self.sgd_weights = self.asgd_weights
