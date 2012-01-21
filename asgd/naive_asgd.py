@@ -265,12 +265,7 @@ class NaiveBinaryASGD(BaseASGD, DetermineStepSizeMixin):
         n_points, n_features = X.shape
         assert n_features == self.n_features
         assert n_points == y.size
-        
-        if tw is None:
-            tw = np.ones((len(y),))
-        else:
-            assert tw.shape == y.shape
-    
+
         n_iterations = self.n_iterations
 
         if self.sgd_step_size0 is None:
@@ -282,7 +277,7 @@ class NaiveBinaryASGD(BaseASGD, DetermineStepSizeMixin):
             Xb = X[idx]
             yb = y[idx]
             wb = w[idx]
-            self.partial_fit(Xb, yb, tw=tw)
+            self.partial_fit(Xb, yb)
 
             if self.feedback:
                 self.sgd_weights = self.asgd_weights
