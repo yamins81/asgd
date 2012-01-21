@@ -1,5 +1,119 @@
-
 import numpy as np
+
+
+#########
+##stats##
+#########
+
+def multiclass_stats(actual, predicted, labels):
+    accuracy = float(100*(predicted == actual).sum() / float(len(predicted)))
+    aps = []
+    aucs = []
+    if len(labels) == 2:
+        labels = labels[1:]
+    for label in labels:
+        prec, rec = precision_and_recall(actual, predicted, label)
+        ap = ap_from_prec_and_rec(prec, rec)
+        aps.append(ap)
+        auc = auc_from_prec_and_rec(prec, rec)
+        aucs.append(auc)
+    ap = np.array(aps).mean()
+    auc = np.array(aucs).mean()
+    return accuracy, ap, auc
+    
+
+def average_precision(actual, predicted, labels):
+    if len(labels) == 2:
+        labels = labels[1:]
+    aps = []
+    for label in labels:
+        prec, rec = precision_and_recall(actual, predicted, label)
+        ap = ap_from_prec_and_rec(prec, rec)
+        aps.append(ap)
+    ap = np.array(aps).mean()
+    return ap
+    
+
+def ap_from_prec_and_rec(prec, rec):
+    ap = 0
+    rng = np.arange(0, 1.1, .1)
+    for th in rng:
+        parray = prec[rec>=th]
+        if len(parray) == 0:
+            p = 0
+        else:
+            p = parray.max()
+        ap += p / rng.size
+    return ap
+
+
+def area_under_curve(actual, predicted, labels):
+    if len(labels) == 2:
+        labels = labels[1:]
+    aucs = []
+    for label in labels:
+        prec, rec = precision_and_recall(actual, predicted, label)
+        auc = auc_from_prec_and_rec(prec, rec)
+        aucs.append(auc)
+    auc = np.array(aucs).mean()
+    return auc
+    
+
+def auc_from_prec_and_rec(prec, rec):
+    #area under curve
+    h = np.diff(rec)
+    auc = np.sum(h * (prec[1:] + prec[:-1])) / 2.0
+    return auc
+
+
+def rsquared(actual, predicted):
+    a_mean = actual.mean()
+    num = np.linalg.norm(actual - predicted) ** 2
+    denom = np.linalg.norm(actual - a_mean) ** 2
+    return 1 -  num / denom
+
+
+def precision_and_recall(actual, predicted, cls):
+    c = (actual == cls)
+    si = np.argsort(-c)
+    tp = np.cumsum(np.single(predicted[si] == cls))
+    fp = np.cumsum(np.single(predicted[si] != cls))
+    rec = tp /np.sum(predicted == cls)
+    prec = tp / (fp + tp)
+    return prec, rec
+    
+
+#########
+##utils##
+#########
+
+def normalize(feats, trace_normalize=False, data=None):
+    """Performs normalizations before training on a list of feature array/label
+    pairs. first feature array in list is taken by default to be training set
+    and norms are computed relative to that one.
+    """
+
+    if data is None:
+        train_f = feats[0]
+        m = train_f.mean(axis=0)
+        s = np.maximum(train_f.std(axis=0), 1e-8)
+    else:
+        m = data['train_mean']
+        s = data['train_std']
+    feats = [(f - m) / s for f in feats]
+    if trace_normalize:
+        if data is None:
+            train_f = feats[0]
+            tr = np.maximum(np.sqrt((train_f**2).sum(axis=1)).mean(), 1e-8)
+        else:
+            tr = data['trace']
+    else:
+        tr = None
+    if trace_normalize:
+        feats = [f / tr for f in feats]
+    feats = tuple(feats)
+    return feats + (m, s, tr)
+
 
 def mean_and_std(X, min_std):
     # XXX: this loop is more memory efficient than numpy but not as
