@@ -281,7 +281,6 @@ class NaiveBinaryASGD(BaseASGD, DetermineStepSizeMixin):
             idx = self.rstate.permutation(n_points)
             Xb = X[idx]
             yb = y[idx]
-            wb = w[idx]
             mb = margin_biases[idx]
             self.partial_fit(Xb, yb, margin_biases=mb)
 
@@ -434,7 +433,7 @@ class NaiveOVAASGD(BaseASGD):
             idx = self.rstate.permutation(n_points)
             Xb = X[idx]
             yb = y[idx]
-            mb = margin_biases=[idx]
+            mb = margin_biases[idx]
             self.partial_fit(Xb, yb, margin_biases=mb)
             
             if self.feedback:
